@@ -1,5 +1,5 @@
 # transfer-fairness
-<img src="fig/demo.png" width="1000px"></img>
+<img src="fig/demo.png" width="500px"></img>
 
 This is the code for our NeurIPS paper <a href="https://openreview.net/pdf?id=zp_Cp38qJE0">Transferring Fairness under Distribution Shifts via Fair
 Consistency Regularization</a>. The code is contributed by Bang An and Zora Che.
