@@ -21,7 +21,8 @@ regularization.
   To do that, you should change the sampling proportions in `load_data` function in `utils.py`.
 * The first experiment on real datasets is based on <a href="https://susanqq.github.io/UTKFace/">
   UTKFace </a> and <a href="https://github.com/joojs/fairface">FairFace </a> datasets. For UTKFace,
-  we use aligned&Cropped Faces. For FairFace, we use the Padding=0.25 version.
+  we use "aligned&cropped faces". For FairFace, we use the Padding=0.25 version. The example indices used 
+  in our paper is under `data/UTKFace` and `data/FairFace`.
 * The second experiment on real datasets is based on NewAdult dataset with
   the <a href="https://github.com/zykls/folktables">Folktables </a> package. We do `ACSIncome`
   prediction task in our paper.
