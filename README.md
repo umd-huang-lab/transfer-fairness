@@ -14,19 +14,27 @@ regularization.
 # Datasets
 
 * Our synthetic dataset is based on
-  <a href="https://github.com/deepmind/3d-shapes">3dshapes </a> dataset. We sample images according
-  to
-  different marginal distributions of latent factors to simulate different types of distribution
-  shift.
-  To do that, you should change the sampling proportions in `load_data` function in `utils.py`.
+  <a href="https://github.com/deepmind/3d-shapes">3dshapes </a> dataset. We save each image as .jpg
+  file and use the index as its file name.
 * The first experiment on real datasets is based on <a href="https://susanqq.github.io/UTKFace/">
   UTKFace </a> and <a href="https://github.com/joojs/fairface">FairFace </a> datasets. For UTKFace,
-  we use "aligned&cropped faces". For FairFace, we use the Padding=0.25 version. The example indices used 
-  in our paper are under `data/UTKFace` and `data/FairFace`.
+  we use "aligned&cropped faces". For FairFace, we use the Padding=0.25 version. The example indices
+  used in our paper are under `data/UTKFace` and `data/fairface`.
 * The second experiment on real datasets is based on NewAdult dataset with
   the <a href="https://github.com/zykls/folktables">Folktables </a> package. We do `ACSIncome`
   prediction task in our paper.
-* Download data into `data` folder.
+* Download data into `data` folder. The file structure would be
+```
+.
+├── data
+    ├── shapes
+    │   └── images     
+    ├── newadult
+    │   └── 2018
+    ├── fairface
+    └── UTKFace
+        └── UTKFace
+```
 
 # How to run
 
@@ -45,23 +53,31 @@ python laftr.py --dataset utk-fairface --model vgg16  --adv-hidden-dim 1024  --l
 python laftr.py --dataset utk-fairface --model vgg16  --adv-hidden-dim 1024  --lr 0.001  --batch-size 100  \
 --test-batch-size 256  --fair-weight 1  --val-epoch 5  --epoch 200   --train-iteration 50  --save-name face_laftr 
 ```
+
 3. CFair
+
 ```
 python cfair.py --dataset utk-fairface --model vgg16  --adv-hidden-dim 1024  --lr 0.001  --batch-size 100  \
 --test-batch-size 256  --fair-weight 1  --val-epoch 5  --epoch 200   --train-iteration 50  --save-name face_cfair 
 ```
+
 4. Laftr+DANN
+
 ```
 python laftr+dann.py --dataset utk-fairface --model vgg16  --adv-hidden-dim 1024  --lr 0.001  --batch-size 100  \
 --test-batch-size 256  --fair-weight 1  --da-weight 1 --val-epoch 5  --epoch 200   --train-iteration 50  --save-name face_laftr_dann 
 ```
+
 4. Laftr+FixMatch
+
 ```
 python laftr+consis.py --dataset utk-fairface --model vgg16  --adv-hidden-dim 1024  --lr 0.001  --batch-size 100  \
 --test-batch-size 256  --fair-weight 1  --consis-weight-source 1 --consis-weight-target 1 --val-epoch 5  --epoch 200   \
 --train-iteration 50  --save-name face_laftr_fixmatch 
 ```
+
 5. Ours (w/Laftr)
+
 ```
 python laftr+consis.py --dataset utk-fairface --model vgg16  --adv-hidden-dim 1024  --lr 0.001  --batch-size 100  \
 --test-batch-size 256  --fair-weight 1  --fair-consis --consis-weight-source 1 --consis-weight-target 1 --val-epoch 5  --epoch 200   \

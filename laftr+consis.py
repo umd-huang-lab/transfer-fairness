@@ -7,7 +7,10 @@ import torch.multiprocessing
 import torch.optim as optim
 
 parser = ArgumentParser()
-parser.add_argument('--dataset', choices=['shapes', 'newadult', 'utk-fairface'], default='utk-fairface')
+parser.add_argument('--dataset', choices=['shapes', 'newadult', 'utk-fairface'],
+                    default='utk-fairface')
+parser.add_argument('--shift_type', choices=['Sshift1', 'Sshift2', 'Dshift', 'Hshift'],
+                    default='Dshift', help='only for shapes dataset')
 parser.add_argument('--num-labels', type=int, default=2)
 parser.add_argument('--num-groups', type=int, default=2)
 parser.add_argument('--save-path', type=str, default='checkpoint')
@@ -17,7 +20,8 @@ parser.add_argument('--num-workers', type=int, default=1)
 parser.add_argument('--epoch', type=int, default=200)
 parser.add_argument('--batch-size', type=int, default=100)
 parser.add_argument('--test-batch-size', type=int, default=256)
-parser.add_argument('--train-iteration', type=int, default=500, help='Number of iteration per epoch')
+parser.add_argument('--train-iteration', type=int, default=500,
+                    help='Number of iteration per epoch')
 parser.add_argument('--normalize-loss', action='store_true', default=False)
 
 parser.add_argument('--model', choices=['vgg16', 'resnet18', "mlp", 'cnn'], default='vgg16')
@@ -26,18 +30,22 @@ parser.add_argument('--weight-decay', type=float, default=5e-4)
 parser.add_argument('--step-lr', type=int, default=100)
 parser.add_argument('--step-lr-gamma', type=float, default=0.1)
 parser.add_argument('--val-epoch', type=int, default=1)
-# parser.add_argument('--evl-consis', action='store_true', default=True)
+parser.add_argument('--seed', type=int, default=1)
 
-parser.add_argument('--fair-type', choices=['dp', 'eql_op_0', 'eql_op_1', 'eql_odd'], default='eql_odd')
+parser.add_argument('--fair-type', choices=['dp', 'eql_op_0', 'eql_op_1', 'eql_odd'],
+                    default='eql_odd')
 parser.add_argument('--adv-hidden-dim', type=int, default=128)
 parser.add_argument('--fair-weight', type=float, default=1.)
 parser.add_argument('--consis-weight-source', type=float, default=1.)
 parser.add_argument('--consis-weight-target', type=float, default=1.)
-parser.add_argument('--threshold', default=0.95, type=float, help='pseudo label threshold for confidence')
+parser.add_argument('--threshold', default=0.95, type=float,
+                    help='pseudo label threshold for confidence')
 parser.add_argument('--fair-consis', action='store_true', default=False,
                     help="Use the proposed fair consistency regularization or not")
 parser.add_argument('--strong-trans', action='store_true', default=True,
                     help="Consistency regularization (FixMatch) uses strong augmentation and weak augmentation. Set True to enable such augmentation.")
+parser.add_argument('--transform_type', type=str, choices=['crop', 'crop_pad'], default='crop',
+                    help="Only use for shapes dataset. Sshift1 and Sshift2 use crop. Dshift and Hshift use crop_pad")
 
 args = parser.parse_args()
 
@@ -56,13 +64,17 @@ def main(args):
     print('Target dataset training size: {}'.format(len(t_train_dataset)))
     print('Target dataset test size: {}'.format(len(t_test_dataset)))
 
-    s_train_dataloader = DataLoader(dataset=s_train_dataset, batch_size=args.batch_size, shuffle=True,
+    s_train_dataloader = DataLoader(dataset=s_train_dataset, batch_size=args.batch_size,
+                                    shuffle=True,
                                     num_workers=args.num_workers)
-    s_test_dataloader = DataLoader(dataset=s_test_dataset, batch_size=args.test_batch_size, shuffle=True,
+    s_test_dataloader = DataLoader(dataset=s_test_dataset, batch_size=args.test_batch_size,
+                                   shuffle=True,
                                    num_workers=args.num_workers)
-    t_train_dataloader = DataLoader(dataset=t_train_dataset, batch_size=args.batch_size, shuffle=True,
+    t_train_dataloader = DataLoader(dataset=t_train_dataset, batch_size=args.batch_size,
+                                    shuffle=True,
                                     num_workers=args.num_workers)
-    t_test_dataloader = DataLoader(dataset=t_test_dataset, batch_size=args.test_batch_size, shuffle=True,
+    t_test_dataloader = DataLoader(dataset=t_test_dataset, batch_size=args.test_batch_size,
+                                   shuffle=True,
                                    num_workers=args.num_workers)
 
     loaders = (s_train_dataloader, s_test_dataloader, t_train_dataloader, t_test_dataloader)
@@ -80,7 +92,8 @@ def train_model(args, model, loaders):
     s_train_dataloader, s_test_dataloader, t_train_dataloader, t_test_dataloader = loaders
 
     # fairness adversary
-    group_discri = DomainDiscriminator(in_feature=model.z_dim, hidden_size=args.adv_hidden_dim).to(args.device)
+    group_discri = DomainDiscriminator(in_feature=model.z_dim, hidden_size=args.adv_hidden_dim).to(
+        args.device)
     if args.fair_type == 'dp':
         fair_adv = LaftrLoss_DP(group_discri).to(args.device)
     else:
@@ -89,9 +102,11 @@ def train_model(args, model, loaders):
     # optimizer
     # optimizer = optim.Adam((list(model.parameters()) + list(group_discri.parameters())), lr=args.lr,
     #                        weight_decay=args.weight_decay)
-    optimizer = optim.SGD((list(model.parameters()) + list(group_discri.parameters())), lr=args.lr, momentum=0.9,
+    optimizer = optim.SGD((list(model.parameters()) + list(group_discri.parameters())), lr=args.lr,
+                          momentum=0.9,
                           weight_decay=args.weight_decay)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=args.step_lr, gamma=args.step_lr_gamma)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=args.step_lr,
+                                          gamma=args.step_lr_gamma)
 
     # statistic
     best_t_acc_fair_odd = 0
@@ -106,17 +121,20 @@ def train_model(args, model, loaders):
 
     for epoch in range(args.epoch):
         # train
-        s_train_loss, s_train_prec, s_train_unfair = train_loop(args, epoch, (s_train_dataloader, t_train_dataloader),
+        s_train_loss, s_train_prec, s_train_unfair = train_loop(args, epoch, (
+        s_train_dataloader, t_train_dataloader),
                                                                 model, fair_adv, optimizer)
 
         # validation
         if epoch % args.val_epoch == args.val_epoch - 1:
             # test in the source domain
-            s_val_loss, s_val_prec, s_val_unfair_var, s_val_unfair_odd, s_result = eval_loop_consis(args, epoch, 'source', s_test_dataloader, model)
+            s_val_loss, s_val_prec, s_val_unfair_var, s_val_unfair_odd, s_result = eval_loop_consis(
+                args, epoch, 'source', s_test_dataloader, model)
             results.append(s_result)
 
             # test in the target domain
-            t_val_loss, t_val_prec, t_val_unfair_var, t_val_unfair_odd, t_result = eval_loop_consis(args, epoch, 'target', t_test_dataloader, model)
+            t_val_loss, t_val_prec, t_val_unfair_var, t_val_unfair_odd, t_result = eval_loop_consis(
+                args, epoch, 'target', t_test_dataloader, model)
             results.append(t_result)
 
             # save best model according to performance on target test set (using acc_var as the unfairness metric)
@@ -152,8 +170,10 @@ def train_model(args, model, loaders):
         if scheduler: scheduler.step()
 
     # save results to csv
-    fields = ["name", "epoch", "domain", "acc", "acc_A0Y0", "acc_A0Y1", "acc_A1Y0", "acc_A1Y1", "consis_A0Y0",
-              "consis_A0Y1", "consis_A1Y0", "consis_A1Y1", "acc_var", "acc_dis", "err_op_0", "err_op_1",
+    fields = ["name", "epoch", "domain", "acc", "acc_A0Y0", "acc_A0Y1", "acc_A1Y0", "acc_A1Y1",
+              "consis_A0Y0",
+              "consis_A0Y1", "consis_A1Y0", "consis_A1Y1", "acc_var", "acc_dis", "err_op_0",
+              "err_op_1",
               "err_odd"]
 
     with open(os.path.join(args.save_csv_path, args.save_name) + '.csv', 'w') as f:
@@ -192,6 +212,9 @@ def train_loop(args, epoch, dataloaders, model, fair_adv, optimizer):
     # prepare data loaders
     dataloader_s, dataloader_t = dataloaders
 
+    # transform function (use for shapes only)
+    transform_fn = transformation_function(args.dataset, args.transform_type)
+
     # train
     for batch_idx in range(args.train_iteration):
         # load source data
@@ -207,10 +230,21 @@ def train_loop(args, epoch, dataloaders, model, fair_adv, optimizer):
             labels = sample_batch_s['label']['gender'].to(args.device)
             groups = sample_batch_s['label']['race'].to(args.device)
 
-        elif args.dataset == 'adult' or args.dataset == 'shapes':
+        elif args.dataset == 'shapes':
             inputs = sample_batch_s[0].float().to(args.device)
             labels = sample_batch_s[1].long().squeeze().to(args.device)
             groups = sample_batch_s[2].long().squeeze().to(args.device)
+            inputs_strong = transform_fn(inputs).to(args.device)
+
+        elif args.dataset == 'newadult':
+            inputs, inputs_strong = sample_batch_s[0]
+            inputs = inputs.float().to(args.device)
+            inputs_strong = inputs_strong.float().to(args.device)
+            labels = sample_batch_s[1].long().squeeze().to(args.device)
+            groups = sample_batch_s[2].long().squeeze().to(args.device)
+
+        else:
+            raise Exception(f'Unknown dataset: {args.dataset}')
 
         # forward
         y, f = model(inputs)
@@ -262,11 +296,19 @@ def train_loop(args, epoch, dataloaders, model, fair_adv, optimizer):
             inputs_t_strong = inputs_t_strong.to(args.device)
             # labels_t = sample_batch_t['label']['gender'].to(args.device)  # labels are not used in training
             groups_t = sample_batch_t['label']['race'].to(args.device)
-
-        elif args.dataset == 'adult' or args.dataset == 'shapes':
+        elif args.dataset == 'shapes':
             inputs_t = sample_batch_t[0].float().to(args.device)
             # labels_t = sample_batch_t[1].long().squeeze().to(args.device)
             groups_t = sample_batch_t[2].long().squeeze().to(args.device)
+            inputs_t_strong = transform_fn(inputs_t).to(args.device)
+        elif args.dataset == 'newadult':
+            inputs_t, inputs_t_strong = sample_batch_s[0]
+            inputs_t = inputs_t.float().to(args.device)
+            inputs_t_strong = inputs_t_strong.float().to(args.device)
+            # labels_t = sample_batch_s[1].long().squeeze().to(args.device)
+            groups_t = sample_batch_s[2].long().squeeze().to(args.device)
+        else:
+            raise Exception(f'Unknown dataset: {args.dataset}')
 
         if args.fair_consis:
             loss_reg_t = fair_fixmatch_loss(model, inputs_t, inputs_t_strong, groups_t, args)
@@ -276,7 +318,8 @@ def train_loop(args, epoch, dataloaders, model, fair_adv, optimizer):
         loss += args.consis_weight_target * loss_reg_t
 
         if args.normalize_loss:
-            loss = loss / (1 + args.fair_weight + args.consis_weight_source + args.consis_weight_target)
+            loss = loss / (
+                        1 + args.fair_weight + args.consis_weight_source + args.consis_weight_target)
 
         # back propagation
         optimizer.zero_grad()

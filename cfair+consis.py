@@ -26,7 +26,7 @@ parser.add_argument('--weight-decay', type=float, default=5e-4)
 parser.add_argument('--step-lr', type=int, default=100)
 parser.add_argument('--step-lr-gamma', type=float, default=0.1)
 parser.add_argument('--val-epoch', type=int, default=1)
-# parser.add_argument('--evl-consis', action='store_true', default=True)
+parser.add_argument('--seed', type=int, default=1)
 
 parser.add_argument('--adv-hidden-dim', type=int, default=128)
 parser.add_argument('--fair-weight', type=float, default=1.)
@@ -41,6 +41,8 @@ parser.add_argument('--fair-consis', action='store_true', default=False,
                     help="Use the proposed fair consistency regularization or not")
 parser.add_argument('--strong-trans', action='store_true', default=True,
                     help="Consistency regularization (FixMatch) uses strong augmentation and weak augmentation. Set True to enable such augmentation.")
+parser.add_argument('--transform_type', type=str, choices=['crop', 'crop_pad'], default='crop', help="Only use for shapes dataset. Sshift1 and Sshift2 use crop. Dshift and Hshift use crop_pad")
+
 
 args = parser.parse_args()
 
@@ -198,6 +200,9 @@ def train_loop(args, epoch, dataloaders, model, fair_adv, optimizer):
     # prepare data loaders
     dataloader_s, dataloader_t = dataloaders
 
+    # transform function (use for shapes only)
+    transform_fn = transformation_function(args.dataset, args.transform_type)
+
     # train
     for batch_idx in range(args.train_iteration):
         # load source data
@@ -213,10 +218,21 @@ def train_loop(args, epoch, dataloaders, model, fair_adv, optimizer):
             labels = sample_batch_s['label']['gender'].to(args.device)
             groups = sample_batch_s['label']['race'].to(args.device)
 
-        elif args.dataset == 'adult' or args.dataset == 'shapes':
+        elif args.dataset == 'shapes':
             inputs = sample_batch_s[0].float().to(args.device)
             labels = sample_batch_s[1].long().squeeze().to(args.device)
             groups = sample_batch_s[2].long().squeeze().to(args.device)
+            inputs_strong = transform_fn(inputs).to(args.device)
+
+        elif args.dataset == 'newadult':
+            inputs, inputs_strong = sample_batch_s[0]
+            inputs = inputs.float().to(args.device)
+            inputs_strong = inputs_strong.float().to(args.device)
+            labels = sample_batch_s[1].long().squeeze().to(args.device)
+            groups = sample_batch_s[2].long().squeeze().to(args.device)
+
+        else:
+            raise Exception(f'Unknown dataset: {args.dataset}')
 
         # forward
         y, f = model(inputs)
@@ -261,11 +277,19 @@ def train_loop(args, epoch, dataloaders, model, fair_adv, optimizer):
             inputs_t_strong = inputs_t_strong.to(args.device)
             # labels_t = sample_batch_t['label']['gender'].to(args.device)  # labels are not used in training
             groups_t = sample_batch_t['label']['race'].to(args.device)
-
-        elif args.dataset == 'adult' or args.dataset == 'shapes':
+        elif args.dataset == 'shapes':
             inputs_t = sample_batch_t[0].float().to(args.device)
             # labels_t = sample_batch_t[1].long().squeeze().to(args.device)
             groups_t = sample_batch_t[2].long().squeeze().to(args.device)
+            inputs_t_strong = transform_fn(inputs_t).to(args.device)
+        elif args.dataset == 'newadult':
+            inputs_t, inputs_t_strong = sample_batch_s[0]
+            inputs_t = inputs_t.float().to(args.device)
+            inputs_t_strong = inputs_t_strong.float().to(args.device)
+            # labels_t = sample_batch_s[1].long().squeeze().to(args.device)
+            groups_t = sample_batch_s[2].long().squeeze().to(args.device)
+        else:
+            raise Exception(f'Unknown dataset: {args.dataset}')
 
         if args.fair_consis:
             loss_reg_t = fair_fixmatch_loss(model, inputs_t, inputs_t_strong, groups_t, args)

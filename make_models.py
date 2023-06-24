@@ -43,61 +43,7 @@ class Face_Resnet(nn.Module):
         return x, f
 
 
-class MLP(nn.Module):
-    def __init__(self, xdim, hdim, zdim, sigmoid=False):
-        super().__init__()
-        self.layers = nn.Sequential(
-            nn.Linear(xdim, hdim),
-            nn.ReLU(inplace=False),
-            nn.Linear(hdim, zdim),
-        )
-        if sigmoid:
-            self.layers.add_module("sigmoid", nn.Sigmoid())
-
-    def forward(self, x):
-        return self.layers(x)
-
-
-class Adult_MLP2(nn.Module):
-    def __init__(self,
-                 features: nn.Module,
-                 num_classes: int = 2):
-        super(Adult_MLP2, self).__init__()
-        self.features = features
-        self.classifier = MLP(8, 8, num_classes)
-        self.z_dim = 8
-
-    def forward(self, x):
-        x = self.features(x)
-        f = torch.flatten(x, 1)
-        x = self.classifier(f)
-        return x, f
-
-
-class Adult_MLP3(nn.Module):
-    def __init__(self, num_classes=2):
-        super().__init__()
-        self.features = nn.Sequential(
-            nn.Linear(100, 100),
-            nn.ReLU(False),
-            nn.Linear(100, 64),
-            nn.ReLU(False)
-        )
-        self.z_dim = 64
-        self.classifier = nn.Sequential(
-            nn.Linear(64, 32),
-            nn.ReLU(True),
-            nn.Linear(32, num_classes),
-        )
-
-    def forward(self, x):
-        # x = torch.flatten(x, 1)
-        f = self.features(x)
-        x = self.classifier(f)
-        return x, f
-
-
-class Adult_MLP1(nn.Module):
+class Adult_MLP(nn.Module):
     def __init__(self, num_classes=2):
         super().__init__()
         self.features = nn.Sequential(
@@ -153,7 +99,7 @@ class CNN(nn.Module):
         return x, f
 
 
-class MLP2(nn.Module):
+class MLP(nn.Module):
     def __init__(self, num_classes=2):
         super().__init__()
         self.features = nn.Sequential(
@@ -164,15 +110,6 @@ class MLP2(nn.Module):
         )
         self.z_dim = 512
         self.classifier = nn.Linear(self.z_dim, num_classes)
-        # self.classifier = nn.Sequential(
-        #     nn.Linear(self.z_dim, 128),
-        #     nn.ReLU(inplace=True),
-        #     nn.Dropout(0.5),
-        #     nn.Linear(128, 128),
-        #     nn.ReLU(inplace=True),
-        #     nn.Dropout(0.5),
-        #     nn.Linear(128, num_classes),
-        #     )
 
     def forward(self, x):
         x = torch.flatten(x, 1)

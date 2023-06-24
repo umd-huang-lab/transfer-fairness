@@ -113,9 +113,10 @@ class FairFaceDataset(Dataset):
 
 class NewAdultDataset(Dataset):
 
-    def __init__(self, states, exclude_states, year, binary_split="non-white",
+    def __init__(self, root, states, exclude_states, year, binary_split="non-white",
                  task="income", phase='train',
                  **kwargs):
+        self.root = root
         self.states = states
         self.all_states = ['AK', 'AL', 'AR', 'AZ', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA',
                            'HI', 'IA', 'ID', 'IL', 'IN', 'KS', 'KY', 'LA', 'MA', 'MD',
@@ -171,7 +172,7 @@ class NewAdultDataset(Dataset):
 
     def load(self):
         assert self.task in ["employment", "income"]
-        data_source = ACSDataSource(survey_year=self.year, horizon='1-Year', survey='person')
+        data_source = ACSDataSource(survey_year=self.year, horizon='1-Year', survey='person', root_dir=self.root)
         acs_data = data_source.get_data(states=self.states, download=True)
 
         if self.task == "employment":
@@ -249,22 +250,16 @@ class NewAdultDataset(Dataset):
 
     def __getitem__(self, index):
         data, target, group = self.x[index], self.y[index], self.a[index]
-        if self.phase == 'train':
-            data_trans = copy.deepcopy(data)
-            data_trans = self.transformation(data_trans)
-            data = self.preprocess(data), self.preprocess(data_trans)
-        else:
-            data = self.preprocess(data)
-        # data = self.preprocess(data)
+        data_trans = copy.deepcopy(data)
+        data_trans = self.transformation(data_trans)
+        data = self.preprocess(data), self.preprocess(data_trans)
 
         return data, target, group
 
 
 class ShapesDataset(Dataset):
     def __init__(self, Y, Y_binary, A, A_binary, Y0A0, Y0A1, Y1A0, Y1A1, D, D_dist, data_path, seed=0,
-                 load_on_init=True,
-                 batch_size=None, phase='train', transform=None, h5=False, h5_notstore=False, size=1000,
-                 train_proportion=0.7, **kwargs):
+                 batch_size=None, phase='train', transform=None, size=1000, train_proportion=0.7):
         self.FACTORS_IN_ORDER = ['floor_hue', 'wall_hue', 'object_hue', 'scale', 'shape',
                                  'orientation']
         self._NUM_VALUES_PER_FACTOR = {'floor_hue': 10, 'wall_hue': 10, 'object_hue': 10,
@@ -283,8 +278,7 @@ class ShapesDataset(Dataset):
                             21.42857143, 25.71428571, 30.]
 
         }
-        self.h5 = h5
-        self.h5_notstore = h5_notstore
+
         self.Y = Y
         self.Y_binary = Y_binary  # indices for [Y_0, Y_1]
         self.A = A
@@ -293,20 +287,18 @@ class ShapesDataset(Dataset):
         self.Y0A1 = Y0A1
         self.Y1A0 = Y1A0
         self.Y1A1 = Y1A1
-        # assert self.Y0A0+self.Y0A1+self.Y1A0+self.Y1A1==1.0
+
         self.D = D
         self.D_dist = D_dist
         self.batch_size = batch_size
         self.phase = phase
         self.data_path = data_path
-        self.loaded = False
         self.seed = seed
         self.transform = transform
         self.size = size
         self.train_proportion = train_proportion
 
-        if load_on_init:
-            self.load()
+        self.load()
 
     def load(self):
         np.random.seed(self.seed)
@@ -315,8 +307,8 @@ class ShapesDataset(Dataset):
             self.A) + "_" + str(self.A_binary) + "_" + str(self.Y0A0) + "_" + str(self.Y0A1) + "_" + str(
             self.Y1A0) + "_" + str(self.Y1A1) + "_" + str(self.D) + "_" + str(self.D_dist) + "_" + str(self.size)
 
-        split_file = os.path.join(self.data_path, "split_indices", split_file_name)
-        print(split_file)
+        split_file = os.path.join(self.data_path, split_file_name)
+
         if not os.path.isfile(split_file + ".npz"):
             indices_D = np.random.multinomial(1, self.D_dist, self.size)
             indices_D = np.argmax(indices_D, axis=1)
@@ -366,63 +358,35 @@ class ShapesDataset(Dataset):
             else:
                 raise Exception("invalid phase name")
         else:
-            if not self.loaded:
-                print("directly loadin!")
-                indices = np.load(split_file + ".npz")
-                if self.phase == 'train':
-                    self.inds = indices["train_inds"]
-                elif self.phase == 'valid':
-                    self.inds = indices["valid_inds"]
-                elif self.phase == 'test':
-                    self.inds = indices["test_inds"]
-                else:
-                    raise Exception("invalid phase name")
-                self.loaded = True
+            indices = np.load(split_file + ".npz")
+            if self.phase == 'train':
+                self.inds = indices["train_inds"]
+            elif self.phase == 'valid':
+                self.inds = indices["valid_inds"]
+            elif self.phase == 'test':
+                self.inds = indices["test_inds"]
             else:
-                print("was loaded already!")
+                raise Exception("invalid phase name")
 
     def __len__(self):
         return len(self.inds)
 
     def __getitem__(self, index):
         split_index = self.inds[index]
-        if self.h5:
-            if self.h5_notstore:
-                with h5py.File(os.path.join(self.data_path, '3dshapes.h5'), 'r') as f:
-                    im = f['images'][split_index]
-                    im_data = np.asarray(im)
-                    im = np.moveaxis(im_data, -1, 0) / 255.
-                    im = torch.from_numpy(im)
-            else:
-                if not hasattr(self, 'images'):
-                    print("did the h5 open?")
-                    self.open_hdf5()
-                if self.transform:
-                    im_data = np.asarray(self.images[split_index])
-                    im = np.moveaxis(im_data, -1, 0) / 255.
-                    im = torch.from_numpy(im)
-                else:
-                    im = np.asarray(self.images[split_index])
-                    im = im / 255.
-                    im = im.astype(np.float32)
-            Y_binary = self.labels[split_index][self.Y_index] == self.VALUES_PER_FACTOR[self.Y][self.Y_binary[1]]
-            Y_binary.astype(int)
-            A_binary = self.labels[split_index][self.A_index] == self.VALUES_PER_FACTOR[self.A][self.A_binary[1]]
-            A_binary.astype(int)
-        else:
-            image_path = os.path.join(self.data_path, "images", str(split_index) + ".jpeg")
-            assert os.path.isfile(image_path)
-            image = Image.open(image_path).convert('RGB')
-            if self.transform:
-                im_data = np.asarray(image)
-                im = np.moveaxis(im_data, -1, 0) / 255.
-                im = torch.from_numpy(im)
-            dict_factor = get_factor(split_index)
-            Y_binary = dict_factor[self.Y] == self.Y_binary[1]
-            Y_binary = int(Y_binary)
-            A_binary = dict_factor[self.A] == self.A_binary[1]
-            A_binary = int(A_binary)
-        return im, Y_binary, A_binary
+        image_path = os.path.join(self.data_path, "images", str(split_index) + ".jpg")
+        assert os.path.isfile(image_path)
+        image = Image.open(image_path)
+        if self.transform:
+            image = self.transform(image)
+            # im_data = np.asarray(image)
+            # im = np.moveaxis(im_data, -1, 0) / 255.
+            # image = torch.from_numpy(im)
+        dict_factor = get_factor(split_index)
+        Y_binary = dict_factor[self.Y] == self.Y_binary[1]
+        Y_binary = int(Y_binary)
+        A_binary = dict_factor[self.A] == self.A_binary[1]
+        A_binary = int(A_binary)
+        return image, Y_binary, A_binary
 
 
 def mb_round(t, bs):
@@ -463,105 +427,3 @@ def get_factor(index):
         factors[name] = start
         index -= start * mult
     return factors
-
-# class FairFaceDataset(Dataset):
-#     def __init__(self, root, race0, race1, domain="age_young", transform=None, transform_strong=None,
-#                  target_transform=None, seed=0,
-#                  phase="train"):
-#         self.root = root
-#         self.transform = transform
-#         self.transform_strong = transform_strong
-#         self.target_transform = target_transform
-#         self.race0 = race0
-#         self.race1 = race1
-#         self.phase = phase
-#         self.domain = domain
-#         self.seed = seed
-#         self.load()
-#
-#     def load(self):
-#         if self.phase == "train" or self.phase == "valid":
-#             csv_file = os.path.join(self.root, "fairface_label_train.csv")
-#         elif self.phase == "test":
-#             csv_file = os.path.join(self.root, "fairface_label_val.csv")
-#
-#         binary_file = os.path.join(
-#             csv_file.strip(".csv") + "_" + self.race0 + "_" + self.race1 + "_" + self.domain + ".csv")
-#         self.make_binary(csv_file, self.race0, self.race1, self.domain)
-#         if not os.path.isfile(binary_file):
-#             self.make_binary(csv_file, self.race0, self.race1, self.domain)
-#         # np.random.seed(self.seed)
-#         if self.phase == "test":
-#             self.df = pd.read_csv(binary_file)
-#         elif self.phase == "valid":
-#             csv_lst = pd.read_csv(binary_file)
-#             self.df = csv_lst.sample(frac=0.15, random_state=self.seed)
-#         elif self.phase == "train":
-#             csv_lst = pd.read_csv(binary_file)
-#             val_lst = csv_lst.sample(frac=0.15, random_state=self.seed)
-#             self.df = csv_lst.loc[csv_lst.index.difference(val_lst.index)]
-#
-#     def make_binary(self, csv_file, race0, race1, domain):
-#         if domain == "age_young":
-#             # domain_lst = ["0-2", "3-9", "10-19", "20-29", "30-39"]
-#             domain_lst = ["10-19", "20-29", "30-39"]
-#         elif domain == "age_old":
-#             domain_lst = ["40-49", "50-59", "60-69", "70+"]
-#         elif domain == "none":
-#             domain_lst = ["10-19", "20-29", "30-39", "40-49", "50-59", "60-69", "70+"]
-#         df = pd.read_csv(csv_file)
-#         if race0 == "White" and race1 == "non-White":
-#             race0_df = df[df['race'].isin(['White', 'Middle Eastern'])]
-#             race1_df = df[df['race'].isin(['Black', 'East Asian', 'Indian', 'Southeast Asian'])]
-#             race0_df.loc[:, 'race'] = 0
-#             race1_df.loc[:, 'race'] = 1
-#         elif race0 == "White" and race1 == "Black":
-#             race0_df = df[df['race'].isin(['White', 'Middle Eastern'])]
-#             race1_df = df[df['race'] == 'Black']
-#             race0_df.loc[:, 'race'] = 0
-#             race1_df.loc[:, 'race'] = 1
-#         race0_df = race0_df[race0_df['age'].isin(domain_lst)]
-#         race1_df = race1_df[race1_df['age'].isin(domain_lst)]
-#
-#         frames = [race0_df, race1_df]
-#         result = pd.concat(frames)
-#
-#         result = result.replace("Male", 0)
-#         result = result.replace("Female", 1)
-#         result.to_csv(csv_file.strip(".csv") + "_" + self.race0 + "_" + self.race1 + "_" + self.domain + ".csv",
-#                       index=False)
-#
-#     def __len__(self):
-#         return len(self.df)
-#
-#     def __getitem__(self, index):
-#
-#         attrs = self.df.iloc[index]
-#
-#         file = attrs["file"]
-#         age = attrs["age"]
-#         gender = attrs["gender"]
-#         race = attrs["race"]
-#
-#         assert gender in [0, 1]
-#         assert race in [0, 1]
-#
-#         label = {'age': age, 'gender': gender, 'race': race}
-#
-#         image_path = os.path.join(self.root, file).rstrip()
-#         assert os.path.isfile(image_path)
-#         image = Image.open(image_path).convert('RGB')
-#
-#         image_transformed = image
-#         label_transformed = label
-#         if self.transform and self.transform_strong:
-#             image_transformed = (self.transform(image), self.transform_strong(image))
-#         elif self.transform:
-#             image_transformed = self.transform(image)
-#
-#         if self.target_transform:
-#             label_transformed['age'] = self.target_transform(label['age'])
-#             label_transformed['gender'] = self.target_transform(label['gender'])
-#             label_transformed['race'] = self.target_transform(label['race'])
-#
-#         return {'image': image_transformed, 'label': label_transformed}

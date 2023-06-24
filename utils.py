@@ -1,8 +1,3 @@
-from sympy import Q
-import torch
-from tqdm import tqdm
-import torch.nn as nn
-import torch.optim as optim
 import os
 import dill
 from torch.utils.data import DataLoader
@@ -61,7 +56,8 @@ def accuracy(output, target, topk=(1,), exact=False):
         if len(target.shape) > 1:
             assert output.shape == target.shape, \
                 "Detected binary classification but output shape != target shape"
-            return [torch.round(torch.sigmoid(output)).eq(torch.round(target)).float().mean()], [-1.0]
+            return [torch.round(torch.sigmoid(output)).eq(torch.round(target)).float().mean()], [
+                -1.0]
 
         maxk = max(topk)
         batch_size = target.size(0)
@@ -161,7 +157,8 @@ def accuracy_cifar(output, target, topk=(1,), per_class=False):
             correct_class = correct * (target.view(1, -1) == class_i).expand_as(pred)
             correct_k = correct_class[0].reshape(-1).float().sum(0)
             rec_num[class_i] = torch.sum(target == class_i)
-            res_per_class[class_i] = (correct_k.mul_(100.0 / rec_num[class_i])) if rec_num[class_i] > 0 else 0.0
+            res_per_class[class_i] = (correct_k.mul_(100.0 / rec_num[class_i])) if rec_num[
+                                                                                       class_i] > 0 else 0.0
         return res_per_class, rec_num
     else:
         res = []
@@ -221,11 +218,17 @@ def eval_loop(args, epoch, domain_type, dataloader, model):
                 inputs = inputs.to(args.device)
                 labels = sample_batch['label']['gender'].to(args.device)
                 groups = sample_batch['label']['race'].to(args.device)
-
-            elif args.dataset == 'adult' or args.dataset == 'shapes' or args.dataset == 'newadult':
+            elif args.dataset == 'shapes':
                 inputs = sample_batch[0].float().to(args.device)
                 labels = sample_batch[1].long().squeeze().to(args.device)
                 groups = sample_batch[2].long().squeeze().to(args.device)
+            elif args.dataset == 'newadult':
+                inputs, _ = sample_batch[0]
+                inputs = inputs.float().to(args.device)
+                labels = sample_batch[1].long().squeeze().to(args.device)
+                groups = sample_batch[2].long().squeeze().to(args.device)
+            else:
+                raise Exception(f'Unknown dataset: {args.dataset}')
 
             # forward
             outputs, features = model(inputs)
@@ -265,8 +268,10 @@ def eval_loop(args, epoch, domain_type, dataloader, model):
             acc_a1_y1=group_acc[1][1]))
 
         # save result
-        result = [args.save_name, epoch, domain_type, accs.avg, group_acc[0][0].item(), group_acc[0][1].item(),
-                  group_acc[1][0].item(), group_acc[1][1].item(), acc_var.item(), acc_dis.item(), err_op0.item(),
+        result = [args.save_name, epoch, domain_type, accs.avg, group_acc[0][0].item(),
+                  group_acc[0][1].item(),
+                  group_acc[1][0].item(), group_acc[1][1].item(), acc_var.item(), acc_dis.item(),
+                  err_op0.item(),
                   err_op1.item(), err_odd.item()]
 
     return losses.avg, accs.avg, acc_var, err_odd, result
@@ -291,6 +296,9 @@ def eval_loop_consis(args, epoch, domain_type, dataloader, model):
     # dataloader
     iterator = enumerate(dataloader)
 
+    # transform function (use for shapes only)
+    transform_fn = transformation_function(args.dataset, args.transform_type)
+
     with torch.no_grad():
         for i, sample_batch in iterator:
             if args.dataset == 'utk-fairface':
@@ -300,10 +308,21 @@ def eval_loop_consis(args, epoch, domain_type, dataloader, model):
                 labels = sample_batch['label']['gender'].to(args.device)
                 groups = sample_batch['label']['race'].to(args.device)
 
-            elif args.dataset == 'adult' or args.dataset == 'shapes' or args.dataset == 'newadult':
+            elif args.dataset == 'shapes':
                 inputs = sample_batch[0].float().to(args.device)
                 labels = sample_batch[1].long().squeeze().to(args.device)
                 groups = sample_batch[2].long().squeeze().to(args.device)
+                inputs_trans = transform_fn(inputs).to(args.device)
+
+            elif args.dataset == 'newadult':
+                inputs, inputs_trans = sample_batch[0]
+                inputs = inputs.float().to(args.device)
+                inputs_trans = inputs_trans.float().to(args.device)
+                labels = sample_batch[1].long().squeeze().to(args.device)
+                groups = sample_batch[2].long().squeeze().to(args.device)
+
+            else:
+                raise Exception(f'Unknown dataset: {args.dataset}')
 
             # forward
             outputs, features = model(inputs)
@@ -364,11 +383,13 @@ def eval_loop_consis(args, epoch, domain_type, dataloader, model):
             consis_a1y1=consis_acc_per_group.avg[3]))
 
         # save result
-        result = [args.save_name, epoch, domain_type, accs.avg, group_acc[0][0].item(), group_acc[0][1].item(),
+        result = [args.save_name, epoch, domain_type, accs.avg, group_acc[0][0].item(),
+                  group_acc[0][1].item(),
                   group_acc[1][0].item(),
                   group_acc[1][1].item(), consis_acc_per_group.avg[0], consis_acc_per_group.avg[1],
                   consis_acc_per_group.avg[2],
-                  consis_acc_per_group.avg[3], acc_var.item(), acc_dis.item(), err_op0.item(), err_op1.item(),
+                  consis_acc_per_group.avg[3], acc_var.item(), acc_dis.item(), err_op0.item(),
+                  err_op1.item(),
                   err_odd.item()]
 
     return losses.avg, accs.avg, acc_var, err_odd, result
@@ -385,7 +406,7 @@ def eval_consis(model, inputs, inputs_trans):
     return consis
 
 
-def transformation_function(dataset, type='none', device='cpu'):
+def transformation_function(dataset, type):
     if dataset == 'utk-fairface':
         transform_fn = transforms.Compose([transforms.RandomHorizontalFlip()] +
                                           [transforms.RandomCrop(96, padding=8)]
@@ -393,34 +414,36 @@ def transformation_function(dataset, type='none', device='cpu'):
     elif dataset == 'shapes':
         if type == 'crop':
             rand_crop = randrange(56, 64)
-            transform_fn = transforms.Compose([transforms.CenterCrop(rand_crop), transforms.Resize([64, 64])])
-        elif type == 'randcrop':
-            transform_fn = transforms.RandomCrop(size=64, padding=10, padding_mode='edge')
-        elif type == 'flip+crop':
-            rand_crop = randrange(58, 64)
-            transform_fn = transforms.Compose([transforms.CenterCrop(rand_crop),
-                                               transforms.RandomHorizontalFlip(),
-                                               transforms.Resize([64, 64])])
-        elif type == 'rotation':
-            transform_fn = transforms.RandomRotation(30)
-        elif type == 'colorjitter':
-            transform_fn = transforms.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=0.5)
-        elif type == 'pad':
-            rand = randrange(1, 20)
             transform_fn = transforms.Compose(
-                [transforms.Pad(padding=[int(40 / rand), int(60 / rand), int(40 / rand), int(20 / rand)],
-                                padding_mode='edge'),
-                 transforms.Resize([64, 64])])
-        else:
+                [transforms.CenterCrop(rand_crop), transforms.Resize([64, 64])])
+        # elif type == 'randcrop':
+        #     transform_fn = transforms.RandomCrop(size=64, padding=10, padding_mode='edge')
+        # elif type == 'flip+crop':
+        #     rand_crop = randrange(58, 64)
+        #     transform_fn = transforms.Compose([transforms.CenterCrop(rand_crop),
+        #                                        transforms.RandomHorizontalFlip(),
+        #                                        transforms.Resize([64, 64])])
+        # elif type == 'pad':
+        #     rand = randrange(1, 20)
+        #     transform_fn = transforms.Compose(
+        #         [transforms.Pad(padding=[int(40 / rand), int(60 / rand), int(40 / rand), int(20 / rand)],
+        #                         padding_mode='edge'),
+        #          transforms.Resize([64, 64])])
+        elif type == 'crop_pad':
             rand_crop = randrange(56, 64)
             rand_pad = randrange(1, 20)
             transform_fn = transforms.Compose(
                 [transforms.Pad(
-                    padding=[int(40 / rand_pad), int(60 / rand_pad), int(40 / rand_pad), int(20 / rand_pad)],
+                    padding=[int(40 / rand_pad), int(60 / rand_pad), int(40 / rand_pad),
+                             int(20 / rand_pad)],
                     padding_mode='edge'),
                     transforms.Resize([64, 64]),
                     transforms.CenterCrop(rand_crop),
                     transforms.Resize([64, 64])])
+        else:
+            raise Exception(f'Unknown transformation type: {type}')
+    else:
+        transform_fn = None
 
     return transform_fn
 
@@ -436,63 +459,92 @@ def load_data(args):
         D = "scale"
         y_binary = [0, 1]
 
-        D_dist_source = [0.5, 0.5, 0., 0., 0., 0., 0., 0.]
-        # D_dist_source = [1 / 8, 1 / 8, 1 / 8, 1 / 8, 1 / 8, 1 / 8, 1 / 8, 1 / 8]
-        # D_dist_source = [4 / 16, 4 / 16, 3 / 16, 1 / 16, 1 / 16, 1 / 16, 1 / 16, 1 / 16]
-        D_dist_target = [0.0, 0.0, 0., 0., 0.0, 0.0, 0.5, 0.5]
-        # D_dist_target = [1 / 8, 1 / 8, 1 / 8, 1 / 8, 1 / 8, 1 / 8, 1 / 8, 1 / 8]
-        # D_dist_target = [1 / 16, 1 / 16, 1 / 16, 1 / 16, 1 / 16, 3 / 16, 4 / 16, 4 / 16]
-        # A_dist = 0.2
-        # A_dist_target = 0.5
-        YA_source = [0.1, 0.4, 0.4, 0.1]  # [Y0A0, Y0A1, Y1A0, Y1A1]
-        YA_target = [0.1, 0.4, 0.4, 0.1]  # [Y0A0, Y0A1, Y1A0, Y1A1]
-        # YA_target = [0.4, 0.1, 0.1, 0.4]  # [Y0A0, Y0A1, Y1A0, Y1A1]
-        # size_s = 2000
-        size_s = 3000
-        size_t = 5000
-        # train_proportion_s = 0.25
-        train_proportion_s = 0.5
+        if args.shift_type == "Sshift1":
+            YA_source = [0.1, 0.4, 0.4, 0.1]  # [Y0A0, Y0A1, Y1A0, Y1A1]
+            YA_target = [0.1, 0.4, 0.4, 0.1]  # [Y0A0, Y0A1, Y1A0, Y1A1]
+            D_dist_source = [4 / 16, 4 / 16, 3 / 16, 1 / 16, 1 / 16, 1 / 16, 1 / 16, 1 / 16]
+            D_dist_target = [1 / 16, 1 / 16, 1 / 16, 1 / 16, 1 / 16, 3 / 16, 4 / 16, 4 / 16]
+            size_s = 2000
+            size_t = 5000
+            train_proportion_s = 0.25
+        elif args.shift_type == "Sshift2":
+            YA_source = [0.1, 0.4, 0.4, 0.1]  # [Y0A0, Y0A1, Y1A0, Y1A1]
+            YA_target = [0.4, 0.1, 0.1, 0.4]  # [Y0A0, Y0A1, Y1A0, Y1A1]
+            D_dist_source = [1 / 8, 1 / 8, 1 / 8, 1 / 8, 1 / 8, 1 / 8, 1 / 8, 1 / 8]
+            D_dist_target = [1 / 8, 1 / 8, 1 / 8, 1 / 8, 1 / 8, 1 / 8, 1 / 8, 1 / 8]
+            size_s = 2000
+            size_t = 5000
+            train_proportion_s = 0.25
+        elif args.shift_type == "Dshift":
+            YA_source = [0.1, 0.4, 0.4, 0.1]  # [Y0A0, Y0A1, Y1A0, Y1A1]
+            YA_target = [0.1, 0.4, 0.4, 0.1]  # [Y0A0, Y0A1, Y1A0, Y1A1]
+            D_dist_source = [0.5, 0.5, 0., 0., 0., 0., 0., 0.]
+            D_dist_target = [1 / 8, 1 / 8, 1 / 8, 1 / 8, 1 / 8, 1 / 8, 1 / 8, 1 / 8]
+            size_s = 3000
+            size_t = 5000
+            train_proportion_s = 0.5
+        elif args.shift_type == "Hshift":
+            YA_source = [0.1, 0.4, 0.4, 0.1]  # [Y0A0, Y0A1, Y1A0, Y1A1]
+            YA_target = [0.4, 0.1, 0.1, 0.4]  # [Y0A0, Y0A1, Y1A0, Y1A1]
+            D_dist_source = [0.5, 0.5, 0., 0., 0., 0., 0., 0.]
+            D_dist_target = [1 / 8, 1 / 8, 1 / 8, 1 / 8, 1 / 8, 1 / 8, 1 / 8, 1 / 8]
+            size_s = 3000
+            size_t = 5000
+            train_proportion_s = 0.5
+        else:
+            raise Exception(f'Unknown shift type {args.shift_type}')
 
-        s_train_dataset = data_loader.ShapesDataset(Y=Y, Y_binary=y_binary, A=A, A_binary=[0, 1], Y0A0=YA_source[0],
-                                                    Y0A1=YA_source[1], Y1A0=YA_source[2], Y1A1=YA_source[3],
-                                                    D=D, D_dist=D_dist_source, data_path=args.data_root,
-                                                    seed=args.seed, load_on_init=True, batch_size=args.batch_size,
-                                                    phase='train', transform=transform_train, size=size_s,
+        s_train_dataset = data_loader.ShapesDataset(Y=Y, Y_binary=y_binary, A=A, A_binary=[0, 1],
+                                                    Y0A0=YA_source[0],
+                                                    Y0A1=YA_source[1], Y1A0=YA_source[2],
+                                                    Y1A1=YA_source[3],
+                                                    D=D, D_dist=D_dist_source,
+                                                    data_path=args.data_root,
+                                                    seed=args.seed, batch_size=args.batch_size,
+                                                    phase='train', transform=transform_train,
+                                                    size=size_s,
                                                     train_proportion=train_proportion_s)
-        s_test_dataset = data_loader.ShapesDataset(Y=Y, Y_binary=y_binary, A=A, A_binary=[0, 1], Y0A0=YA_source[0],
-                                                   Y0A1=YA_source[1], Y1A0=YA_source[2], Y1A1=YA_source[3],
-                                                   D=D, D_dist=D_dist_source, data_path=args.data_root,
-                                                   seed=args.seed, load_on_init=True, batch_size=args.batch_size,
+        s_test_dataset = data_loader.ShapesDataset(Y=Y, Y_binary=y_binary, A=A, A_binary=[0, 1],
+                                                   Y0A0=YA_source[0],
+                                                   Y0A1=YA_source[1], Y1A0=YA_source[2],
+                                                   Y1A1=YA_source[3],
+                                                   D=D, D_dist=D_dist_source,
+                                                   data_path=args.data_root,
+                                                   seed=args.seed, batch_size=args.batch_size,
                                                    phase='test', transform=transform, size=size_s,
                                                    train_proportion=train_proportion_s)
 
-        t_train_dataset = data_loader.ShapesDataset(Y=Y, Y_binary=y_binary, A=A, A_binary=[0, 1], Y0A0=YA_target[0],
-                                                    Y0A1=YA_target[1], Y1A0=YA_target[2], Y1A1=YA_target[3],
-                                                    D=D, D_dist=D_dist_target, data_path=args.data_root,
-                                                    seed=args.seed, load_on_init=True, batch_size=args.batch_size,
+        t_train_dataset = data_loader.ShapesDataset(Y=Y, Y_binary=y_binary, A=A, A_binary=[0, 1],
+                                                    Y0A0=YA_target[0],
+                                                    Y0A1=YA_target[1], Y1A0=YA_target[2],
+                                                    Y1A1=YA_target[3],
+                                                    D=D, D_dist=D_dist_target,
+                                                    data_path=args.data_root,
+                                                    seed=args.seed, batch_size=args.batch_size,
                                                     phase='train', transform=transform, size=size_t)
-        t_test_dataset = data_loader.ShapesDataset(Y=Y, Y_binary=y_binary, A=A, A_binary=[0, 1], Y0A0=YA_target[0],
-                                                   Y0A1=YA_target[1], Y1A0=YA_target[2], Y1A1=YA_target[3],
-                                                   D=D, D_dist=D_dist_target, data_path=args.data_root,
-                                                   seed=args.seed, load_on_init=True, batch_size=args.batch_size,
+        t_test_dataset = data_loader.ShapesDataset(Y=Y, Y_binary=y_binary, A=A, A_binary=[0, 1],
+                                                   Y0A0=YA_target[0],
+                                                   Y0A1=YA_target[1], Y1A0=YA_target[2],
+                                                   Y1A1=YA_target[3],
+                                                   D=D, D_dist=D_dist_target,
+                                                   data_path=args.data_root,
+                                                   seed=args.seed, batch_size=args.batch_size,
                                                    phase='test', transform=transform, size=size_t)
 
     elif args.dataset == 'newadult':
-        s_train_dataset = data_loader.NewAdultDataset(args.source_state, False, '2018', task=args.state_task,
+        s_train_dataset = data_loader.NewAdultDataset(args.data_root, args.source_state, False,
+                                                      '2018', task=args.state_task,
                                                       phase='train')
-        # s_val_dataset = data_loader.NewAdultDataset(args.source_state,False, '2018', task=args.state_task, phase='valid')
-        s_test_dataset = data_loader.NewAdultDataset(args.source_state, False, '2018', task=args.state_task,
+        s_test_dataset = data_loader.NewAdultDataset(args.data_root, args.source_state, False,
+                                                     '2018', task=args.state_task,
                                                      phase='test')
 
-        t_train_dataset = data_loader.NewAdultDataset(args.source_state, True, '2018', task=args.state_task,
+        t_train_dataset = data_loader.NewAdultDataset(args.data_root, args.source_state, True,
+                                                      '2018', task=args.state_task,
                                                       phase='train')
-        # t_val_dataset = data_loader.NewAdultDataset(args.source_state,False,'2018', task=args.state_task, phase='valid')
-        t_test_dataset = data_loader.NewAdultDataset(args.source_state, True, '2018', task=args.state_task,
+        t_test_dataset = data_loader.NewAdultDataset(args.data_root, args.source_state, True,
+                                                     '2018', task=args.state_task,
                                                      phase='test')
-
-        # t_train_dataset = data_loader.NewAdultDataset(args.target_state, False, '2018', task=args.state_task, phase='train')
-        # # t_val_dataset = data_loader.NewAdultDataset(args.source_state,False,'2018', task=args.state_task, phase='valid')
-        # t_test_dataset = data_loader.NewAdultDataset(args.target_state, False, '2018', task=args.state_task, phase='test')
 
     elif args.dataset == 'utk-fairface':
         transform = transforms.Compose([
@@ -514,7 +566,6 @@ def load_data(args):
             transform_weak = transform
             transform_strong = None
 
-        # if args.setting == 'white-black':
         # UTKFace data
         with open(os.path.join(args.data_root_utk, 'white_list.pkl'), 'rb') as f:
             utk_race1_list = pickle.load(f)
@@ -522,30 +573,31 @@ def load_data(args):
             utk_race2_list = pickle.load(f)
         utk_train = utk_race1_list[0] + utk_race2_list[0]
         utk_test = utk_race1_list[1] + utk_race2_list[1]
-        # FairFace data
+        # fairface data
         ff_train = os.path.join(args.data_root_fairface, 'train_white_black.csv')
         ff_test = os.path.join(args.data_root_fairface, 'test_white_black.csv')
 
-        # elif args.setting == 'white-nonwhite':
-        #     with open(os.path.join(args.data_root_utk, 'white_list.pkl'), 'rb') as f:
-        #         utk_race1_list = pickle.load(f)
-        #     with open(os.path.join(args.data_root_utk, 'non_white_list.pkl'), 'rb') as f:
-        #         utk_race2_list = pickle.load(f)
-        #     ff_train = os.path.join(args.data_root_fairface, 'train_white_nonwhite.csv')
-        #     ff_test = os.path.join(args.data_root_fairface, 'test_white_nonwhite.csv')
-
         # make data loaders
-        s_train_dataset = data_loader.UTKFaceDataset(root=os.path.join(args.data_root_utk, 'UTKFace'),
-                                                     images_name_list=utk_train,
-                                                     transform=transform_weak, transform_strong=transform_strong)
-        s_test_dataset = data_loader.UTKFaceDataset(root=os.path.join(args.data_root_utk, 'UTKFace'),
-                                                    images_name_list=utk_test,
-                                                    transform=transform, transform_strong=transform_strong)
+        s_train_dataset = data_loader.UTKFaceDataset(
+            root=os.path.join(args.data_root_utk, 'UTKFace'),
+            images_name_list=utk_train,
+            transform=transform_weak, transform_strong=transform_strong)
+        s_test_dataset = data_loader.UTKFaceDataset(
+            root=os.path.join(args.data_root_utk, 'UTKFace'),
+            images_name_list=utk_test,
+            transform=transform, transform_strong=transform_strong)
 
-        t_train_dataset = data_loader.FairFaceDataset(root=args.data_root_fairface, images_file=ff_train,
-                                                      transform=transform_weak, transform_strong=transform_strong)
-        t_test_dataset = data_loader.FairFaceDataset(root=args.data_root_fairface, images_file=ff_test,
-                                                     transform=transform, transform_strong=transform_strong)
+        t_train_dataset = data_loader.FairFaceDataset(root=args.data_root_fairface,
+                                                      images_file=ff_train,
+                                                      transform=transform_weak,
+                                                      transform_strong=transform_strong)
+        t_test_dataset = data_loader.FairFaceDataset(root=args.data_root_fairface,
+                                                     images_file=ff_test,
+                                                     transform=transform,
+                                                     transform_strong=transform_strong)
+
+    else:
+        raise Exception(f'Unknown dataset: {args.dataset}')
 
     return s_train_dataset, s_test_dataset, t_train_dataset, t_test_dataset
 
@@ -559,14 +611,18 @@ def load_model(args):
             model_ft = models.resnet18(pretrained=False)
             features = torch.nn.Sequential(*list(model_ft.children())[:-1])
             model = Face_Resnet(features, args.num_labels)
+        else:
+            raise Exception(f'Unknown model type {args.model}')
     elif args.dataset == 'newadult':
         if args.model == 'mlp':
-            model = Adult_MLP1(args.num_labels)
+            model = Adult_MLP(args.num_labels)
+        else:
+            raise Exception(f'Only support model type: mlp')
     elif args.dataset == 'shapes':
-        if args.model == 'cnn':
-            model = CNN(num_classes=args.num_labels)
-        elif args.model == 'mlp':
-            model = MLP2(num_classes=args.num_labels)
+        if args.model == 'mlp':
+            model = MLP(num_classes=args.num_labels)
+        else:
+            raise Exception(f'Only support model type: mlp')
     elif args.dataset == 'cifar10':
         backbone = models.resnet18(pretrained=args.pretrain)
         backbone.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
@@ -578,29 +634,48 @@ def load_model(args):
 
 def fill_args(args):
     if args.dataset == 'shapes':
-        args.data_root = ''
-        args.save_path = ''
-        args.val_epoch = 1
-        args.epoch = 200
+        args.data_root = 'data/shapes/'
+        args.save_path = 'checkpoint/shapes'
+        args.save_csv_path = 'csv/shapes'
         args.batch_size = 128
+        args.model = 'mlp'
         args.adv_hidden_dim = 64
         args.num_workers = 1
+        args.reverse = True
+        args.fair_weight = 2
+        args.epoch = 200
+        args.step_lr = 200
+        if args.shift_type in ('Sshift1', 'Sshift2'):
+            args.train_iteration = 4
+            args.transform_type = 'crop'
+            args.lr = 0.01
+        elif args.shift_type in ('Dshift', 'Hshift'):
+            args.train_iteration = 12
+            args.transform_type = 'crop_pad'
+            args.lr = 0.001
 
     elif args.dataset == 'newadult':
-        args.data_root = ''
-        args.save_path = ''
+        args.data_root = 'data/newadult/'
+        args.save_path = 'checkpoint/newadult'
+        args.save_csv_path = 'csv/newadult'
         args.val_epoch = 2
-        args.evl_consis = False
         args.adv_hidden_dim = 128
         args.num_workers = 1
         args.epoch = 50
-        args.source_state = 'CA'
-
+        args.model = 'mlp'
+        args.source_state = ['CA']
+        args.state_task = 'income'
+        args.reverse = False
+        args.fair_weight = 2
+        args.batch_size = 1024
+        args.train_iteration = 120
+        args.step_lr = 50
+        args.lr = 0.01
     elif args.dataset == 'utk-fairface':
         args.data_root_utk = 'data/UTKFace'
-        args.data_root_fairface = 'data/FairFace'
-        args.save_path = ''
-        args.save_csv_path = ''
+        args.data_root_fairface = 'data/fairface'
+        args.save_path = 'checkpoint/utk-fairface'
+        args.save_csv_path = 'csv/face'
         args.num_workers = 1
-
+        args.reverse = False
     return args

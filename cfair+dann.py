@@ -7,7 +7,8 @@ from dalib.adaptation.dann import DomainAdversarialLoss
 import torch.optim as optim
 
 parser = ArgumentParser()
-parser.add_argument('--dataset', choices=['shapes', 'newadult', 'utk-fairface'], default='utk-fairface')
+parser.add_argument('--dataset', choices=['shapes', 'newadult', 'utk-fairface'],
+                    default='utk-fairface')
 parser.add_argument('--num-labels', type=int, default=2)
 parser.add_argument('--num-groups', type=int, default=2)
 parser.add_argument('--save-path', type=str, default='checkpoint')
@@ -17,7 +18,8 @@ parser.add_argument('--num-workers', type=int, default=1)
 parser.add_argument('--epoch', type=int, default=200)
 parser.add_argument('--batch-size', type=int, default=100)
 parser.add_argument('--test-batch-size', type=int, default=256)
-parser.add_argument('--train-iteration', type=int, default=500, help='Number of iteration per epoch')
+parser.add_argument('--train-iteration', type=int, default=500,
+                    help='Number of iteration per epoch')
 parser.add_argument('--normalize-loss', action='store_true', default=False)
 
 parser.add_argument('--model', choices=['vgg16', 'resnet18', "mlp", 'cnn'], default='vgg16')
@@ -26,6 +28,7 @@ parser.add_argument('--weight-decay', type=float, default=5e-4)
 parser.add_argument('--step-lr', type=int, default=100)
 parser.add_argument('--step-lr-gamma', type=float, default=0.1)
 parser.add_argument('--val-epoch', type=int, default=1)
+parser.add_argument('--seed', type=int, default=1)
 
 parser.add_argument('--adv-hidden-dim', type=int, default=128)
 parser.add_argument('--fair-weight', type=float, default=1.)
@@ -43,9 +46,12 @@ def main(args):
     args.strong_trans = False
     args = fill_args(args)
     args.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    args.reweight_target_tensor = torch.tensor([1.0 / (1.0 - args.train_y_1), 1.0 / args.train_y_1]).to(args.device)
-    reweight_attr_0_tensor = torch.tensor([1.0 / (1.0 - args.train_base_0), 1.0 / args.train_base_0]).to(args.device)
-    reweight_attr_1_tensor = torch.tensor([1.0 / (1.0 - args.train_base_1), 1.0 / args.train_base_1]).to(args.device)
+    args.reweight_target_tensor = torch.tensor(
+        [1.0 / (1.0 - args.train_y_1), 1.0 / args.train_y_1]).to(args.device)
+    reweight_attr_0_tensor = torch.tensor(
+        [1.0 / (1.0 - args.train_base_0), 1.0 / args.train_base_0]).to(args.device)
+    reweight_attr_1_tensor = torch.tensor(
+        [1.0 / (1.0 - args.train_base_1), 1.0 / args.train_base_1]).to(args.device)
     args.reweight_attr_tensors = [reweight_attr_0_tensor, reweight_attr_1_tensor]
     print(args)
 
@@ -57,13 +63,17 @@ def main(args):
     print('Target dataset training size: {}'.format(len(t_train_dataset)))
     print('Target dataset test size: {}'.format(len(t_test_dataset)))
 
-    s_train_dataloader = DataLoader(dataset=s_train_dataset, batch_size=args.batch_size, shuffle=True,
+    s_train_dataloader = DataLoader(dataset=s_train_dataset, batch_size=args.batch_size,
+                                    shuffle=True,
                                     num_workers=args.num_workers)
-    s_test_dataloader = DataLoader(dataset=s_test_dataset, batch_size=args.test_batch_size, shuffle=True,
+    s_test_dataloader = DataLoader(dataset=s_test_dataset, batch_size=args.test_batch_size,
+                                   shuffle=True,
                                    num_workers=args.num_workers)
-    t_train_dataloader = DataLoader(dataset=t_train_dataset, batch_size=args.batch_size, shuffle=True,
+    t_train_dataloader = DataLoader(dataset=t_train_dataset, batch_size=args.batch_size,
+                                    shuffle=True,
                                     num_workers=args.num_workers)
-    t_test_dataloader = DataLoader(dataset=t_test_dataset, batch_size=args.test_batch_size, shuffle=True,
+    t_test_dataloader = DataLoader(dataset=t_test_dataset, batch_size=args.test_batch_size,
+                                   shuffle=True,
                                    num_workers=args.num_workers)
 
     loaders = (s_train_dataloader, s_test_dataloader, t_train_dataloader, t_test_dataloader)
@@ -81,20 +91,25 @@ def train_model(args, model, loaders):
     s_train_dataloader, s_test_dataloader, t_train_dataloader, t_test_dataloader = loaders
 
     # fairness adversary
-    group_discri_0 = DomainDiscriminator2(in_feature=model.z_dim, hidden_size=args.adv_hidden_dim).to(args.device)
-    group_discri_1 = DomainDiscriminator2(in_feature=model.z_dim, hidden_size=args.adv_hidden_dim).to(args.device)
+    group_discri_0 = DomainDiscriminator2(in_feature=model.z_dim,
+                                          hidden_size=args.adv_hidden_dim).to(args.device)
+    group_discri_1 = DomainDiscriminator2(in_feature=model.z_dim,
+                                          hidden_size=args.adv_hidden_dim).to(args.device)
 
     fair_adv = CFair(group_discri_0, group_discri_1, args.reweight_attr_tensors).to(args.device)
 
     # domain adversary
-    domain_discri = DomainDiscriminator(in_feature=model.z_dim, hidden_size=args.adv_hidden_dim).to(args.device)
+    domain_discri = DomainDiscriminator(in_feature=model.z_dim, hidden_size=args.adv_hidden_dim).to(
+        args.device)
     domain_adv = DomainAdversarialLoss(domain_discri).to(args.device)
 
     # optimizer
     optimizer = optim.SGD(
-        (list(model.parameters()) +  list(group_discri_0.parameters()) + list(group_discri_1.parameters()) + list(domain_discri.parameters())),
+        (list(model.parameters()) + list(group_discri_0.parameters()) + list(
+            group_discri_1.parameters()) + list(domain_discri.parameters())),
         lr=args.lr, momentum=0.9, weight_decay=args.weight_decay)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=args.step_lr, gamma=args.step_lr_gamma)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=args.step_lr,
+                                          gamma=args.step_lr_gamma)
 
     # statistic
     best_t_acc_fair_odd = 0
@@ -109,19 +124,27 @@ def train_model(args, model, loaders):
 
     for epoch in range(args.epoch):
         # train
-        s_train_loss, s_train_prec, s_train_unfair = train_loop(args, epoch, (s_train_dataloader, t_train_dataloader),
-                                                                model, fair_adv, domain_adv, optimizer)
+        s_train_loss, s_train_prec, s_train_unfair = train_loop(args, epoch, (
+        s_train_dataloader, t_train_dataloader),
+                                                                model, fair_adv, domain_adv,
+                                                                optimizer)
 
         # validation
         if epoch % args.val_epoch == args.val_epoch - 1:
             # test in the source domain
-            s_val_loss, s_val_prec, s_val_unfair_var, s_val_unfair_odd, s_result = eval_loop(args, epoch, 'source',
-                                                                                             s_test_dataloader, model)
+            s_val_loss, s_val_prec, s_val_unfair_var, s_val_unfair_odd, s_result = eval_loop(args,
+                                                                                             epoch,
+                                                                                             'source',
+                                                                                             s_test_dataloader,
+                                                                                             model)
             results.append(s_result)
 
             # test in the target domain
-            t_val_loss, t_val_prec, t_val_unfair_var, t_val_unfair_odd, t_result = eval_loop(args, epoch, 'target',
-                                                                                             t_test_dataloader, model)
+            t_val_loss, t_val_prec, t_val_unfair_var, t_val_unfair_odd, t_result = eval_loop(args,
+                                                                                             epoch,
+                                                                                             'target',
+                                                                                             t_test_dataloader,
+                                                                                             model)
             results.append(t_result)
 
             # save best model according to performance on target test set (using acc_var as the unfairness metric)
@@ -157,7 +180,8 @@ def train_model(args, model, loaders):
         if scheduler: scheduler.step()
 
     # save results to csv
-    fields = ["name", "epoch", "domain", "acc", "acc_A0Y0", "acc_A0Y1", "acc_A1Y0", "acc_A1Y1", "acc_var", "acc_dis",
+    fields = ["name", "epoch", "domain", "acc", "acc_A0Y0", "acc_A0Y1", "acc_A1Y0", "acc_A1Y1",
+              "acc_var", "acc_dis",
               "err_op_0", "err_op_1", "err_odd"]
 
     with open(os.path.join(args.save_csv_path, args.save_name) + '.csv', 'w') as f:
@@ -208,11 +232,18 @@ def train_loop(args, epoch, dataloaders, model, fair_adv, domain_adv, optimizer)
             inputs_s = sample_batch_s['image'].to(args.device)
             labels_s = sample_batch_s['label']['gender'].to(args.device)
             groups_s = sample_batch_s['label']['race'].to(args.device)
-
-        elif args.dataset == 'adult' or args.dataset == 'shapes':
+        elif args.dataset == 'shapes':
             inputs_s = sample_batch_s[0].float().to(args.device)
             labels_s = sample_batch_s[1].long().squeeze().to(args.device)
             groups_s = sample_batch_s[2].long().squeeze().to(args.device)
+        elif args.dataset == 'newadult':
+            inputs_s, _ = sample_batch_s[0]
+            inputs_s = inputs_s.float().to(args.device)
+            labels_s = sample_batch_s[1].long().squeeze().to(args.device)
+            groups_s = sample_batch_s[2].long().squeeze().to(args.device)
+
+        else:
+            raise Exception(f'Unknown dataset: {args.dataset}')
 
         # target data
         try:
@@ -226,10 +257,18 @@ def train_loop(args, epoch, dataloaders, model, fair_adv, domain_adv, optimizer)
             # labels_t = sample_batch_t['label']['gender'].to(args.device)
             # groups_t = sample_batch_t['label']['race'].to(args.device)
 
-        elif args.dataset == 'adult' or args.dataset == 'shapes':
+        elif args.dataset == 'shapes':
             inputs_t = sample_batch_t[0].float().to(args.device)
             # labels_t = sample_batch_t[1].long().squeeze().to(args.device)
             # groups_t = sample_batch_t[2].long().squeeze().to(args.device)
+        elif args.dataset == 'newadult':
+            inputs_t, _ = sample_batch_s[0]
+            inputs_t = inputs_t.float().to(args.device)
+            # labels_t = sample_batch_s[1].long().squeeze().to(args.device)
+            # groups_t = sample_batch_s[2].long().squeeze().to(args.device)
+
+        else:
+            raise Exception(f'Unknown dataset: {args.dataset}')
 
         # forward
         x = torch.cat((inputs_s, inputs_t), dim=0)
@@ -281,8 +320,10 @@ def train_loop(args, epoch, dataloaders, model, fair_adv, domain_adv, optimizer)
         '{0} | Cls_Loss:{loss_cls:.4f} Fair_Loss:{loss_fair:.4f} Trans_Loss:{loss_trans:.4f} | '
         'Acc:{acc:.2f} FAdv_Acc:{fair_adv_acc:.2f} DAdv_Acc {domain_adv_acc:.2f} | Unfairness acc_var:{acc_var:.2f} '
         'acc_dis:{acc_dis:.2f} e_op_0:{err_op0:.2f} e_op_1:{err_op1:.2f} e_odd:{err_odd:.2f}'.format(
-            epoch, loss_cls=cls_losses.avg, loss_fair=fair_losses.avg, loss_trans=transfer_losses.avg,
-            acc=accs.avg, fair_adv_acc=fair_adv_accs.avg, domain_adv_acc=domain_adv_accs.avg, acc_var=acc_var,
+            epoch, loss_cls=cls_losses.avg, loss_fair=fair_losses.avg,
+            loss_trans=transfer_losses.avg,
+            acc=accs.avg, fair_adv_acc=fair_adv_accs.avg, domain_adv_acc=domain_adv_accs.avg,
+            acc_var=acc_var,
             acc_dis=acc_dis, err_op0=err_op0, err_op1=err_op1, err_odd=err_odd,
         ))
 
